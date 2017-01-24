@@ -1,0 +1,41 @@
+#$ -cwd
+#$ -q high_mem
+#$ -pe mpich 40
+#$ -S /bin/bash
+
+module load Bowtie2/v2.2.7
+module load samtools/v1.3.1
+module load bcftools/v1.3.1
+
+REF=../../00_data/Skeletonema_marinoi_Ref.v1_primary_contigs.fasta
+DBNAME=st54_300lib
+FILE1=/nobackup/data5/data/skeletonema/reads/1_130918_AC2D94ACXX_P704_106_dual28_1.FXT.CA.FQF.Pair.fastq
+FILE2=/nobackup/data5/data/skeletonema/reads/1_130918_AC2D94ACXX_P704_106_dual28_2.FXT.CA.FQF.Pair.fastq
+
+# Original command from paper
+#bwa aln -k 2 -n .001 -c -l 18 -t $NSLOTS $REF $FILE1 $FILE2 $FILE3 $FILE4
+
+# Indes the reference
+bowtie2-build --threads $NSLOTS -f $REF $DBNAME
+
+# Map reads to reference and convert to .bam and sort
+bowtie2 -x $DBNAME --no-unal --very-sensitive -p $NSLOTS --mm -1 $FILE1 -2 $FILE2 -S ${DBNAME}.sam 2> bowtie2.log
+samtools view -Sb ${DBNAME}.sam > ${DBNAME}.bam
+samtools sort ${DBNAME}.bam -o ${DBNAME}_sorted.bam
+
+# Remove duplicates
+samtools rmdup ${DBNAME}_sorted.bam ${DBNAME}_sorted_nodup.bam
+samtools index ${DBNAME}_sorted_nodup.bam
+
+# Variant calling
+# -A, --count-orphans     do not discard anomalous read pairs
+# -B, --no-BAQ            disable BAQ (per-Base Alignment Quality)
+# -q, --min-MQ INT        skip alignments with mapQ smaller than INT [0]
+
+samtools index $REF
+# samtools mpileup -C50 -A -B -u -g -q1 -f $REF ${DBNAME}_sorted_nodup.bam | bcftools view -g -t .007 - | bcftools view - | vcfutils.pl varFilter -D 10000 > ${DBNAME}.vcf
+samtools mpileup -C50 -A -B -u -g -q1 -f $REF ${DBNAME}_sorted_nodup.bam | bcftools view - | vcfutils.pl varFilter -D 10000 > ${DBNAME}.vcf
+
+# Clean up
+xz ${DBNAME}.sam
+xz ${DBNAME}.bam
